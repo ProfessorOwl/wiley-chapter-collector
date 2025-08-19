@@ -27,11 +27,7 @@ def wileygetter(url:str, directory:str|os.PathLike):
 
 	# Find the title in the parsed HTML
 	title = parsed.find("meta", property="og:title")
-	title = title["content"]
-
-	# Remove a possible space at the beginning of the title
-	if title[0] == " ":
-		title = title[1:]
+	title = title["content"].strip() # Clean up the title
 
 	# Get all the links and transform them into downloadadble ones. I suppose that these links could vary for different documents.
 	links = parsed.find_all("a", title="EPDF")
@@ -41,26 +37,27 @@ def wileygetter(url:str, directory:str|os.PathLike):
 	# Create a temporery folder for each chapter pdf
 	os.mkdir(f"{directory}{title}")
 
+	# Some options for downloading the pdf
+	options = webdriver.ChromeOptions()
+	options.add_experimental_option('prefs', {
+	"download.default_directory": f"{directory}{title}", #Change default directory for downloads
+	"download.prompt_for_download": False, #To auto download the file
+	"download.directory_upgrade": True,
+	"plugins.always_open_pdf_externally": True #It will not show PDF directly in chrome
+	})
+
+	# Start the normal driver here, it seems to do just fine and should be a little bit quicker
+	driver = webdriver.Chrome(options=options)
 	# Download every PDF
 	for pdfurl in links:
-		# Some options for downloading the pdf
-		options = webdriver.ChromeOptions()
-		options.add_experimental_option('prefs', {
-		"download.default_directory": f"{directory}{title}", #Change default directory for downloads
-		"download.prompt_for_download": False, #To auto download the file
-		"download.directory_upgrade": True,
-		"plugins.always_open_pdf_externally": True #It will not show PDF directly in chrome
-		})
-
-		# Start the normal driver here, it seems to do just fine and should be a little bit quicker
-		driver = webdriver.Chrome(options=options)
 		num_of_pdf_before_download = len([f for f in os.listdir(f"{directory}{title}") if f.endswith(".pdf")])
 		driver.get(pdfurl)
 
 		# Test if a new pdf file appeared and close driver only when it is done.
 		while len([f for f in os.listdir(f"{directory}{title}") if f.endswith(".pdf")]) == num_of_pdf_before_download:
 			time.sleep(0.5)
-		driver.quit()
+		
+	driver.quit()
 
 	# Get the name of all downloaded files
 	search_dir = f"{directory}{title}"
@@ -76,24 +73,28 @@ def wileygetter(url:str, directory:str|os.PathLike):
 
 	# Do some processing if no EOF marker is present in the pdf. This will otherwise lead to merge errors
 	EOF_MARKER = b'%%EOF'
+
+	merger = PdfMerger()
+
 	for pdffile in files:
 		with open(pdffile, 'rb') as f:
 			contents = f.read()
-
-		# Check if EOF is somewhere else in the file
-		if EOF_MARKER in contents:
-			# We can remove the early %%EOF and put it at the end of the file
-			contents = contents.replace(EOF_MARKER, b'')
-			contents = contents + EOF_MARKER
-		else:
-			# Some files really don't have an EOF marker
-			# In this case it helped to manually review the end of the file
-			contents = contents[:-6] + EOF_MARKER
-		with open(pdffile, "wb") as f:
-			f.write(contents)
+		try:
+			merger.append(PdfReader(pdffile))
+		except:
+			# Check if EOF is somewhere else in the file
+			if EOF_MARKER in contents:
+				# We can remove the early %%EOF and put it at the end of the file
+				contents = contents.replace(EOF_MARKER, b'')
+				contents = contents + EOF_MARKER
+			else:
+				# Some files really don't have an EOF marker
+				# In this case it helped to manually review the end of the file
+				contents = contents[:-6] + EOF_MARKER
+			with open(pdffile, "wb") as f:
+				f.write(contents)
 
 		# Now merge all the files together to one big pdf
-		merger = PdfMerger()
 		merger.append(PdfReader(pdffile))
 		#os.remove(pdffile)
 
